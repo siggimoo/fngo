@@ -100,6 +100,43 @@ func Map[I any, O any](input Pipeline[I], f func(context.Context, I) (O, error))
 	}
 }
 
+// ParallelMap is identical to Map except the mapping operations are performed in parallel.
+// This process is not guaranteed to maintain the order of the values.
+func ParallelMap[I any, O any](input Pipeline[I], f func(context.Context, I) (O, error)) Pipeline[O] {
+	output := make(chan O)
+
+	input.group.Go(func() error {
+		defer close(output)
+		mappingGroup, mappingContext := errgroup.WithContext(input.ctx)
+
+		for value := range input.values {
+			value := value
+			mappingGroup.Go(func() error {
+				newValue, err := f(mappingContext, value)
+				if err != nil {
+					return err
+				}
+
+				select {
+				case output <- newValue:
+					return nil
+
+				case <-mappingContext.Done():
+					return mappingContext.Err()
+				}
+			})
+		}
+
+		return mappingGroup.Wait()
+	})
+
+	return Pipeline[O]{
+		ctx:    input.ctx,
+		group:  input.group,
+		values: output,
+	}
+}
+
 // Sink is a processing stage that consumes values of type T using the given function. Any error generated
 // by the Pipeline's errgroup will be returned here.
 func Sink[T any](input Pipeline[T], f func(context.Context, T) error) error {

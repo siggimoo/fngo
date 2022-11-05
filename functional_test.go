@@ -8,6 +8,56 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestParallelMap(t *testing.T) {
+	expectedLengths := map[int]any{
+		3: true,
+		4: true,
+		5: true,
+		6: true,
+		7: true,
+	}
+
+	tests := []struct {
+		name          string
+		mapError      error
+		cancelContext bool
+		expectedError error
+	}{
+		{"nominal", nil, false, nil},
+		{"mapError", assert.AnError, false, assert.AnError},
+		{"masterContextCanceled", nil, true, context.Canceled},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			if test.cancelContext {
+				cancel()
+			}
+
+			names := SliceSource(ctx, []string{"alice", "bob", "charlie", "darren", "erin"})
+
+			mappedLengths := ParallelMap(names, func(_ context.Context, name string) (int, error) {
+				return len(name), test.mapError
+			})
+
+			actualLengths := make(map[int]any)
+			err := Sink(mappedLengths, func(_ context.Context, length int) error {
+				actualLengths[length] = true
+				return nil
+			})
+
+			assert.Equal(t, test.expectedError, err, "wrong error")
+
+			if test.expectedError == nil {
+				assert.Equal(t, expectedLengths, actualLengths, "wrong lengths")
+			}
+		})
+	}
+}
+
 func TestPipeline(t *testing.T) {
 	expectedNames := []string{
 		"alice",
