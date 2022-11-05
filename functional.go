@@ -100,6 +100,43 @@ func Map[I any, O any](input Pipeline[I], f func(context.Context, I) (O, error))
 	}
 }
 
+// ParallelFilter is identical to Filter except the filtering operations are performed in parallel.
+// This process is not guaranteed to maintain the order of the values.
+func ParallelFilter[T any](input Pipeline[T], f func(context.Context, T) (bool, error)) Pipeline[T] {
+	output := make(chan T)
+
+	input.group.Go(func() error {
+		defer close(output)
+		filteringGroup, filteringContext := errgroup.WithContext(input.ctx)
+
+		for value := range input.values {
+			value := value
+			filteringGroup.Go(func() error {
+				pass, err := f(input.ctx, value)
+				if err != nil {
+					return err
+				} else if pass {
+					select {
+					case output <- value:
+					case <-filteringContext.Done():
+						return filteringContext.Err()
+					}
+				}
+
+				return nil
+			})
+		}
+
+		return filteringGroup.Wait()
+	})
+
+	return Pipeline[T]{
+		ctx:    input.ctx,
+		group:  input.group,
+		values: output,
+	}
+}
+
 // ParallelMap is identical to Map except the mapping operations are performed in parallel.
 // This process is not guaranteed to maintain the order of the values.
 func ParallelMap[I any, O any](input Pipeline[I], f func(context.Context, I) (O, error)) Pipeline[O] {

@@ -8,6 +8,54 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestParallelFilter(t *testing.T) {
+	expectedNames := map[string]any{
+		"alice":   true,
+		"charlie": true,
+		"darren":  true,
+	}
+
+	tests := []struct {
+		name          string
+		filterError   error
+		cancelContext bool
+		expectedError error
+	}{
+		{"nominal", nil, false, nil},
+		{"filterError", assert.AnError, false, assert.AnError},
+		{"masterContextCanceled", nil, true, context.Canceled},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			if test.cancelContext {
+				cancel()
+			}
+
+			names := SliceSource(ctx, []string{"alice", "bob", "charlie", "darren", "erin"})
+
+			filteredNames := ParallelFilter(names, func(_ context.Context, name string) (bool, error) {
+				return strings.ContainsRune(name, 'a'), test.filterError
+			})
+
+			actualNames := make(map[string]any)
+			err := Sink(filteredNames, func(_ context.Context, name string) error {
+				actualNames[name] = true
+				return nil
+			})
+
+			assert.Equal(t, test.expectedError, err, "wrong error")
+
+			if test.expectedError == nil {
+				assert.Equal(t, expectedNames, actualNames, "wrong names")
+			}
+		})
+	}
+}
+
 func TestParallelMap(t *testing.T) {
 	expectedLengths := map[int]any{
 		3: true,

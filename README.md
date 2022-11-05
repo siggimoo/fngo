@@ -10,7 +10,7 @@ Every pipeline begins with a `Source` producing a sequence of typed values and e
 - `Flatten` -- Collapses a slice-of-slices into a simple slice (e.g. `[[1,2,3],[4,5,6]]` becomes `[1,2,3,4,5,6]`)
 - `Map` -- Converts values into something new according to a rule
 
-A parallelized version of Map also exists but does not guarantee the sequence of values is maintained.
+Parallelized versions of `Filter` and `Map` also exist but do not guarantee the sequence of values is maintained.
 
 ## Example
 
