@@ -14,15 +14,15 @@ type Pipeline[T any] struct {
 }
 
 // Filter is a processing stage that passes or blocks values of type T according to whether
-// the given function returns true or false, respectively.
-func Filter[T any](input Pipeline[T], f func(context.Context, T) (bool, error)) Pipeline[T] {
+// the given filter function returns true or false, respectively.
+func Filter[T any](input Pipeline[T], filter func(context.Context, T) (bool, error)) Pipeline[T] {
 	output := make(chan T)
 
 	input.group.Go(func() error {
 		defer close(output)
 
 		for value := range input.values {
-			pass, err := f(input.ctx, value)
+			pass, err := filter(input.ctx, value)
 			if err != nil {
 				return err
 			} else if pass {
@@ -70,15 +70,15 @@ func Flatten[T any](input Pipeline[[]T]) Pipeline[T] {
 	}
 }
 
-// Map is a processing stage that converts values of type I into values of type O using the given function.
-func Map[I any, O any](input Pipeline[I], f func(context.Context, I) (O, error)) Pipeline[O] {
+// Map is a processing stage that converts values of type I into values of type O using the given mapper function.
+func Map[I, O any](input Pipeline[I], mapper func(context.Context, I) (O, error)) Pipeline[O] {
 	output := make(chan O)
 
 	input.group.Go(func() error {
 		defer close(output)
 
 		for value := range input.values {
-			newValue, err := f(input.ctx, value)
+			newValue, err := mapper(input.ctx, value)
 			if err != nil {
 				return err
 			}
@@ -102,7 +102,7 @@ func Map[I any, O any](input Pipeline[I], f func(context.Context, I) (O, error))
 
 // ParallelFilter is identical to Filter except the filtering operations are performed in parallel.
 // This process is not guaranteed to maintain the order of the values.
-func ParallelFilter[T any](input Pipeline[T], f func(context.Context, T) (bool, error)) Pipeline[T] {
+func ParallelFilter[T any](input Pipeline[T], filter func(context.Context, T) (bool, error)) Pipeline[T] {
 	output := make(chan T)
 
 	input.group.Go(func() error {
@@ -112,7 +112,7 @@ func ParallelFilter[T any](input Pipeline[T], f func(context.Context, T) (bool, 
 		for value := range input.values {
 			value := value
 			filteringGroup.Go(func() error {
-				pass, err := f(input.ctx, value)
+				pass, err := filter(input.ctx, value)
 				if err != nil {
 					return err
 				} else if pass {
@@ -139,7 +139,7 @@ func ParallelFilter[T any](input Pipeline[T], f func(context.Context, T) (bool, 
 
 // ParallelMap is identical to Map except the mapping operations are performed in parallel.
 // This process is not guaranteed to maintain the order of the values.
-func ParallelMap[I any, O any](input Pipeline[I], f func(context.Context, I) (O, error)) Pipeline[O] {
+func ParallelMap[I, O any](input Pipeline[I], mapper func(context.Context, I) (O, error)) Pipeline[O] {
 	output := make(chan O)
 
 	input.group.Go(func() error {
@@ -149,7 +149,7 @@ func ParallelMap[I any, O any](input Pipeline[I], f func(context.Context, I) (O,
 		for value := range input.values {
 			value := value
 			mappingGroup.Go(func() error {
-				newValue, err := f(mappingContext, value)
+				newValue, err := mapper(mappingContext, value)
 				if err != nil {
 					return err
 				}
@@ -174,9 +174,31 @@ func ParallelMap[I any, O any](input Pipeline[I], f func(context.Context, I) (O,
 	}
 }
 
-// Sink is a processing stage that consumes values of type T using the given function. Any error generated
+// Reduce is a terminal processing stage that consumes values of type I and reduces them down to a single value of type O
+// using the given reducer function, beginning with the given initial state.
+func Reduce[I, O any](input Pipeline[I], reducer func(context.Context, I, O) (O, error), initialState O) (O, error) {
+	currentState := initialState
+
+	input.group.Go(func() error {
+		for value := range input.values {
+			newState, err := reducer(input.ctx, value, currentState)
+			if err != nil {
+				return err
+			}
+
+			currentState = newState
+		}
+
+		return nil
+	})
+
+	err := input.group.Wait()
+	return currentState, err
+}
+
+// Sink is a terminal processing stage that consumes values of type T using the given sink function. Any error generated
 // by the Pipeline's errgroup will be returned here.
-func Sink[T any](input Pipeline[T], f func(context.Context, T) error) error {
+func Sink[T any](input Pipeline[T], sink func(context.Context, T) error) error {
 	input.group.Go(func() error {
 		for {
 			select {
@@ -184,7 +206,7 @@ func Sink[T any](input Pipeline[T], f func(context.Context, T) error) error {
 				if !ok {
 					return nil
 				}
-				if err := f(input.ctx, value); err != nil {
+				if err := sink(input.ctx, value); err != nil {
 					return err
 				}
 
@@ -210,11 +232,11 @@ func SliceSource[T any](ctx context.Context, slice []T) Pipeline[T] {
 	})
 }
 
-// Source is a processing stage that generates values of type T using the given function.
+// Source is a processing stage that generates values of type T using the given source function.
 // This and all subsequent stages will run within an errgroup created from the given Context.
 //
 // The channel passed to the generator function is automatically closed when the function returns.
-func Source[T any](ctx context.Context, f func(context.Context, func(T) error) error) Pipeline[T] {
+func Source[T any](ctx context.Context, source func(context.Context, func(T) error) error) Pipeline[T] {
 	group, groupContext := errgroup.WithContext(ctx)
 	output := make(chan T)
 
@@ -230,7 +252,7 @@ func Source[T any](ctx context.Context, f func(context.Context, func(T) error) e
 			}
 		}
 
-		return f(groupContext, emit)
+		return source(groupContext, emit)
 	})
 
 	return Pipeline[T]{

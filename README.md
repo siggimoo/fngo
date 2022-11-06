@@ -4,7 +4,7 @@ This Golang package provides support for functional-style processing pipelines u
 
 ## Usage
 
-Every pipeline begins with a `Source` producing a sequence of typed values and ends with a `Sink` consuming a sequence of values. In between these can be any combination of processing functions, of which the following are presently supported:
+Every pipeline begins with a `Source` producing a sequence of typed values and ends with a `Reduce` or `Sink` consuming a sequence of values. In between these can be any combination of processing functions, of which the following are presently supported:
 
 - `Filter` -- Removes values according to a rule
 - `Flatten` -- Collapses a slice-of-slices into a simple slice (e.g. `[[1,2,3],[4,5,6]]` becomes `[1,2,3,4,5,6]`)

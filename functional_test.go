@@ -194,6 +194,35 @@ func TestPipeline(t *testing.T) {
 	}
 }
 
+func TestReduce(t *testing.T) {
+	const expectedTotalLength = 24
+
+	tests := []struct {
+		name          string
+		reduceError   error
+		expectedError error
+	}{
+		{"nominal", nil, nil},
+		{"reduceError", assert.AnError, assert.AnError},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			names := SliceSource(context.Background(), []string{"alice", "bob", "charlie", "david", "erin"})
+
+			actualTotalLength, err := Reduce(names, func(_ context.Context, name string, currentTotal int) (int, error) {
+				return currentTotal + len(name), test.reduceError
+			}, 0)
+
+			assert.Equal(t, test.expectedError, err, "wrong error")
+
+			if test.expectedError == nil {
+				assert.Equal(t, expectedTotalLength, actualTotalLength, "wrong total-length")
+			}
+		})
+	}
+}
+
 func TestSliceSource(t *testing.T) {
 	expectedNames := []string{"alice", "bob", "charlie", "david", "erin"}
 
